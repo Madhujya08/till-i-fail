@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Linq.Expressions;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -27,9 +28,18 @@ public class PlayerMovement2D : MonoBehaviour
     [SerializeField] private float dashCooldown = 0.25f;
     [SerializeField] private bool dashInAirOnly = false;
 
-    [Header("Grounding")]
-    [SerializeField] private LayerMask groundMask;
-    [SerializeField] private float groundCheckExtra = 0.05f;
+    [Header("Ground Probe")]
+    [SerializeField] float probeHeight = 0.08f;
+    [SerializeField] float probeShrink = 0.10f;
+    [SerializeField] LayerMask groundMask;
+    [SerializeField] int groundedMinFrames = 2;
+
+    [Header("Step/Unstick")]
+    [SerializeField] private float stepHeight = 0.12f;
+    [SerializeField] private float stepCheckDistance = 0.12f;
+    [SerializeField] private float stuckSpeedThreshold = 0.02f;
+    [SerializeField] private int stuckFrameToNudge = 2;
+    [SerializeField] private float unstickNudgeUp = 0.02f;
 
     [Header("Debug")]
     [SerializeField] private bool drawGroundRay = true;
@@ -37,40 +47,35 @@ public class PlayerMovement2D : MonoBehaviour
     private Rigidbody2D rb;
     private Collider2D collider;
     private SpriteRenderer sr;
-    private Sprite currentSprite;
     private Vector2 moveInput;
     private bool isFacingRight = true;
 
     private int jumpsRemaining;
     private bool isDashing;
+    private bool grounded;
     private bool wasGrounded;
+    private int groundedGrace;
 
     private long lastOnGroundTime;
     private float lastJumpPressedTime;
-    private float baseGravity;
 
-    public bool isOnGround;
+    private int StuckFrames;
 
     private void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
         collider = GetComponent<Collider2D>();
         sr = GetComponent<SpriteRenderer>();
-        currentSprite = sr.sprite;
 
         rb.gravityScale = 4f;
         rb.constraints = RigidbodyConstraints2D.FreezeRotation;
+
+        rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
+        rb.sleepMode = RigidbodySleepMode2D.NeverSleep;
 
         jumpsRemaining = maxJumps;
 
         
-    }
-
-    private void Start()
-    {
-        rb.gravityScale = 4f;
-        rb.constraints = RigidbodyConstraints2D.FreezeRotation;
-
     }
 
     private void Update()
@@ -78,7 +83,6 @@ public class PlayerMovement2D : MonoBehaviour
         long currentTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
         moveInput = new Vector2(Input.GetAxisRaw("Horizontal"), 0f);
-        bool grounded = isGrounded2();
 
         if (Input.GetKeyDown(KeyCode.Space))
             lastJumpPressedTime = jumpBufferTime;                                                //buffer jump input
@@ -91,23 +95,16 @@ public class PlayerMovement2D : MonoBehaviour
 
         if (Input.GetKeyDown(KeyCode.LeftShift)&& !isDashing)
         {
-            if (!dashInAirOnly || (dashInAirOnly && !isGrounded2()))                                                     //dash 
+            if (!dashInAirOnly || (dashInAirOnly && !grounded))                                                     //dash 
                 StartCoroutine(Dash());
         }
 
 
         if (grounded) lastOnGroundTime = currentTime;                        //coyote time 
         
-
-        if (grounded && !wasGrounded)                                       //recharging the jump
-        {
-            jumpsRemaining = maxJumps;
-        }
-
-        wasGrounded = grounded;
+        bool canCoyoteJump =  currentTime - lastOnGroundTime < coyoteTime;
 
        
-        bool canCoyoteJump =  currentTime - lastOnGroundTime < coyoteTime;
         if (lastJumpPressedTime > 0f && jumpsRemaining > 0 && (grounded || jumpsRemaining < maxJumps || canCoyoteJump))
         {
             if (canCoyoteJump)
@@ -123,20 +120,56 @@ public class PlayerMovement2D : MonoBehaviour
 
     private void FixedUpdate()
     {
+        bool hit = ProbeGround();
+
+        if (hit)
+        {
+            groundedGrace = groundedMinFrames;
+            grounded = true;
+        }
+        else
+        {
+            if (groundedGrace > 0)
+                groundedGrace--;
+            else
+                grounded = false;
+        }
+
+        if (grounded && !wasGrounded)
+        {
+            jumpsRemaining = maxJumps;
+        }
+        wasGrounded = grounded;
+
+        StepUpIfNeeded();
+        UnstickIfNeeded();
+
         if (!isDashing)
         {
-            bool grounded = isGrounded2();
             float targetX = moveInput.x * moveSpeed;
 
             float accel = grounded ? groundAcceleration : airAcceleration;
             float decel = grounded ? groundAcceleration : airDeceleration;
 
-            float newX = Mathf.MoveTowards(rb.linearVelocity.x, targetX, accel * Time.fixedDeltaTime);
-            if (Mathf.Abs(moveInput.x) < 0.01f)
-                newX = Mathf.MoveTowards(rb.linearVelocity.x, 0, decel * Time.fixedDeltaTime);
+            float newX;
+            if (Mathf.Abs(moveInput.x) > 0.01f)
+            {
+                newX = Mathf.MoveTowards(rb.linearVelocity.x, targetX, accel * Time.fixedDeltaTime);
+            }
+            else
+            {
+                newX = Mathf.MoveTowards(rb.linearVelocity.x, 0f, decel * Time.fixedDeltaTime);
+            }
 
             Vector2 velocity = rb.linearVelocity;
             velocity.x = newX;
+            velocity.y = Mathf.Max(velocity.y, -maxFallSpeed);
+            rb.linearVelocity = velocity;
+        }
+
+        else
+        {
+            Vector2 velocity = rb.linearVelocity;
             velocity.y = Mathf.Max(velocity.y, -maxFallSpeed);
             rb.linearVelocity = velocity;
         }
@@ -145,7 +178,7 @@ public class PlayerMovement2D : MonoBehaviour
     private void PerformJump()
     {
         float g = -Physics2D.gravity.y * rb.gravityScale;
-        float jumpVel = Mathf.Sqrt(2f * g * desiredJumpHeight);
+        float jumpVel = Mathf.Sqrt(2f * g * Mathf.Max(0.01f, desiredJumpHeight));
 
         jumpsRemaining = Mathf.Max(0, jumpsRemaining - 1);
 
@@ -164,7 +197,7 @@ public class PlayerMovement2D : MonoBehaviour
 
         float xDir = inputX != 0 ? Mathf.Sign(inputX) : (isFacingRight ? 1f : -1f);
 
-        rb.linearVelocity = new Vector2(xDir * dashSpeed, rb.linearVelocity.y);
+        rb.linearVelocity = new Vector2(xDir * dashSpeed, 0f);
 
         yield return new WaitForSeconds(dashDuration);
 
@@ -174,34 +207,98 @@ public class PlayerMovement2D : MonoBehaviour
         yield return new WaitForSeconds(dashCooldown);
     }
 
+    bool ProbeGround()
+    {
+        var bounds = collider.bounds;
+        var size = new Vector2(bounds.size.x * (1f - probeShrink), probeHeight);
+        var center = new Vector2(bounds.center.x, bounds.min.y - probeHeight * 0.5f);
+        return Physics2D.OverlapBox(center, size, 0f, groundMask) != null;
+    }
+
+    private void StepUpIfNeeded()
+    {
+        if (!grounded || Mathf.Abs(moveInput.x) < 0.01f)
+            return;
+
+        float dir = Mathf.Sign(moveInput.x);
+
+        Bounds b = collider.bounds;
+        Vector2 feet = new Vector2(b.center.x, b.min.y + 0.01f);
+
+        bool lowHit = Physics2D.Raycast(feet, new Vector2(dir, 0), stepCheckDistance, groundMask);
+
+        Vector2 upperOrigin = feet + Vector2.up * stepHeight;
+        bool highHit = Physics2D.Raycast(upperOrigin, new Vector2(dir, 0f), stepCheckDistance, groundMask);
+
+        if (lowHit && !highHit)
+        {
+            rb.position += Vector2.up * stepHeight;
+        }
+    }
+
+    private void UnstickIfNeeded()
+    {
+        bool pushing = grounded && Mathf.Abs(moveInput.x) > 0.01f;
+        float speedX = Mathf.Abs(rb.linearVelocity.x);
+
+        if(pushing && speedX < stuckFrameToNudge)
+        {
+            StuckFrames++;
+            if (StuckFrames >= stuckFrameToNudge)
+            {
+                rb.position += Vector2.up * unstickNudgeUp;
+                StuckFrames = 0;
+            }
+        }
+        else
+        {
+            StuckFrames = 0;
+        }
+    }
+
+    private void OnDrawGizmosSelected()
+    {
+        if (!drawGroundRay) return;
+        if (collider == null) collider = GetComponent<Collider2D>();
+
+        Bounds b = collider.bounds;
+        Vector2 size = new Vector2(b.size.x * (1f - probeShrink), probeHeight);
+        Vector2 center = new Vector2(b.center.x, b.min.y - probeHeight * 0.5f);
+
+        Gizmos.color = Color.green;
+        Gizmos.DrawWireCube(center, size);
+    }
+
     //private bool isGrounded()
     //{
     //    Bounds bounds = collider.bounds;
     //    Vector2 origin = bounds.center;
     //    float distance = bounds.extents.y + groundCheckExtra;
-   //     return Physics2D.Raycast(origin, Vector2.down , distance,  groundMask);
-  // }
+    //     return Physics2D.Raycast(origin, Vector2.down , distance,  groundMask);
+    // }
 
-    private bool isGrounded2() 
-    { float extraHeight = 0.1f; 
-      RaycastHit2D hit = Physics2D.Raycast(transform.position, Vector2.down, GetComponent<Collider2D>().bounds.extents.y + extraHeight, LayerMask.GetMask("Ground")); 
-      return hit.collider != null; 
-    }
+    // private bool isGrounded2() 
+    // { float extraHeight = 0.1f; 
+    //   RaycastHit2D hit = Physics2D.Raycast(transform.position, Vector2.down, GetComponent<Collider2D>().bounds.extents.y + extraHeight, LayerMask.GetMask("Ground")); 
+    //   return hit.collider != null; 
+    // }
 
 
-   // private void OnCollisionEnter2D(Collision2D collision)
-  //  {
-   //     if (collision.gameObject.CompareTag("Ground"))
-   //     {
-  //          isOnGround = true;
-  //      }
-   // }
 
- //   private void OnCollisionExit2D(Collision2D collision)
-//    {
- //       if (collision.gameObject.CompareTag("Ground"))
- //       {
- //           isOnGround = false;
-  //      }
- //   }
+
+    // private void OnCollisionEnter2D(Collision2D collision)
+    //  {
+    //     if (collision.gameObject.CompareTag("Ground"))
+    //     {
+    //          isOnGround = true;
+    //      }
+    // }
+
+    //   private void OnCollisionExit2D(Collision2D collision)
+    //    {
+    //       if (collision.gameObject.CompareTag("Ground"))
+    //       {
+    //           isOnGround = false;
+    //      }
+    //   }
 }
