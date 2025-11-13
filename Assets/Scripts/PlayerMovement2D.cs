@@ -221,18 +221,28 @@ public class PlayerMovement2D : MonoBehaviour
             return;
 
         float dir = Mathf.Sign(moveInput.x);
-
         Bounds b = collider.bounds;
-        Vector2 feet = new Vector2(b.center.x, b.min.y + 0.01f);
 
-        bool lowHit = Physics2D.Raycast(feet, new Vector2(dir, 0), stepCheckDistance, groundMask);
+        Vector2 feet = new Vector2(b.center.x, b.min.y + 0.02f);
 
-        Vector2 upperOrigin = feet + Vector2.up * stepHeight;
-        bool highHit = Physics2D.Raycast(upperOrigin, new Vector2(dir, 0f), stepCheckDistance, groundMask);
+        RaycastHit2D lowHit = Physics2D.Raycast(feet, Vector2.right * dir, stepCheckDistance, groundMask);
 
-        if (lowHit && !highHit)
+        if (!lowHit)
+            return;
+
+        Vector2 stepToStart = new Vector2(lowHit.point.x, b.min.y + stepHeight + 0.02f);
+        RaycastHit2D downHit = Physics2D.Raycast(stepToStart, Vector2.down, stepHeight + 0.04f, groundMask);
+
+        if (!downHit)
+            return;
+
+        float currentFeetY = b.min.y;
+        float desiredFeetY = downHit.point.y;
+        float stepSize = desiredFeetY - currentFeetY;
+
+        if (stepSize > 0f && stepSize <= stepHeight)
         {
-            rb.position += Vector2.up * stepHeight;
+            rb.position += Vector2.up * stepSize;
         }
     }
 
@@ -241,7 +251,7 @@ public class PlayerMovement2D : MonoBehaviour
         bool pushing = grounded && Mathf.Abs(moveInput.x) > 0.01f;
         float speedX = Mathf.Abs(rb.linearVelocity.x);
 
-        if(pushing && speedX < stuckFrameToNudge)
+        if(pushing && speedX < stuckSpeedThreshold)
         {
             StuckFrames++;
             if (StuckFrames >= stuckFrameToNudge)
