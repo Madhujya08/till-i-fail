@@ -44,7 +44,7 @@ public class PlayerMovement2D : MonoBehaviour
     [Header("Debug")]
     [SerializeField] private bool drawGroundRay = true;
 
-    private Rigidbody2D rb;
+    private KinematicBody2D body;
     private Collider2D collider;
     private SpriteRenderer sr;
     private Vector2 moveInput;
@@ -63,13 +63,13 @@ public class PlayerMovement2D : MonoBehaviour
 
     private void Awake()
     {
-        rb = GetComponent<Rigidbody2D>();
-        collider = GetComponent<Collider2D>();
+        body  = GetComponent<KinematicBody2D>();
+        collider = body.col;
         sr = GetComponent<SpriteRenderer>();
 
+        var rb = body.rb;
         rb.gravityScale = 4f;
         rb.constraints = RigidbodyConstraints2D.FreezeRotation;
-
         rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
         rb.sleepMode = RigidbodySleepMode2D.NeverSleep;
 
@@ -90,8 +90,12 @@ public class PlayerMovement2D : MonoBehaviour
             lastJumpPressedTime -= Time.deltaTime;
 
 
-        if (Input.GetKeyUp(KeyCode.Space) && rb.linearVelocity.y > 0f)                                                  //variable jump height
-            rb.linearVelocity = new Vector2(rb.linearVelocity.x, rb.linearVelocity.y * jumpCutMultiplier);
+        if (Input.GetKeyUp(KeyCode.Space) && body.Velocity.y > 0f)
+        {                                                                                                       //variable jump height
+            Vector2 v = body.Velocity;
+            v.y *= jumpCutMultiplier;
+            body.Velocity = v;
+        }
 
         if (Input.GetKeyDown(KeyCode.LeftShift)&& !isDashing)
         {
@@ -141,9 +145,6 @@ public class PlayerMovement2D : MonoBehaviour
         }
         wasGrounded = grounded;
 
-        StepUpIfNeeded();
-        UnstickIfNeeded();
-
         if (!isDashing)
         {
             float targetX = moveInput.x * moveSpeed;
@@ -151,57 +152,57 @@ public class PlayerMovement2D : MonoBehaviour
             float accel = grounded ? groundAcceleration : airAcceleration;
             float decel = grounded ? groundAcceleration : airDeceleration;
 
-            float newX;
+            Vector2 v = body.Velocity;
             if (Mathf.Abs(moveInput.x) > 0.01f)
             {
-                newX = Mathf.MoveTowards(rb.linearVelocity.x, targetX, accel * Time.fixedDeltaTime);
+                v.x = Mathf.MoveTowards(v.x, targetX, accel * Time.fixedDeltaTime);
             }
             else
             {
-                newX = Mathf.MoveTowards(rb.linearVelocity.x, 0f, decel * Time.fixedDeltaTime);
+                v.x = Mathf.MoveTowards(v.x, 0f, decel * Time.fixedDeltaTime);
             }
 
-            Vector2 velocity = rb.linearVelocity;
-            velocity.x = newX;
-            velocity.y = Mathf.Max(velocity.y, -maxFallSpeed);
-            rb.linearVelocity = velocity;
+            v.y = Mathf.Max(v.y, -maxFallSpeed);
+            body.Velocity = v;
         }
 
         else
         {
-            Vector2 velocity = rb.linearVelocity;
-            velocity.y = Mathf.Max(velocity.y, -maxFallSpeed);
-            rb.linearVelocity = velocity;
+            Vector2 v = body.Velocity;
+            v.y = Mathf.Max(v.y, -maxFallSpeed);
+            body.Velocity = v;
         }
     }
 
     private void PerformJump()
     {
-        float g = -Physics2D.gravity.y * rb.gravityScale;
+        float g = -Physics2D.gravity.y * body.rb.gravityScale;
         float jumpVel = Mathf.Sqrt(2f * g * Mathf.Max(0.01f, desiredJumpHeight));
 
         jumpsRemaining = Mathf.Max(0, jumpsRemaining - 1);
-
-        rb.linearVelocity = new Vector2(rb.linearVelocity.x, jumpVel);
         lastOnGroundTime = 0;
+
+        Vector2 v = body.Velocity;
+        v.y = jumpVel;
+        body.Velocity = v;
     }
 
     private IEnumerator Dash()
     {
         isDashing = true;
 
-        float originalGravityScale = rb.gravityScale;
-        rb.gravityScale = 0f;
+        float originalGravityScale = body.rb.gravityScale;
+        body.rb.gravityScale= 0f;
 
         float inputX = Input.GetAxisRaw("Horizontal");
 
         float xDir = inputX != 0 ? Mathf.Sign(inputX) : (isFacingRight ? 1f : -1f);
 
-        rb.linearVelocity = new Vector2(xDir * dashSpeed, 0f);
+        body.Velocity = new Vector2(xDir * dashSpeed, 0f);
 
         yield return new WaitForSeconds(dashDuration);
 
-        rb.gravityScale = originalGravityScale;
+        body.rb.gravityScale = originalGravityScale;
         isDashing = false;
 
         yield return new WaitForSeconds(dashCooldown);
@@ -242,21 +243,21 @@ public class PlayerMovement2D : MonoBehaviour
 
         if (stepSize > 0f && stepSize <= stepHeight)
         {
-            rb.position += Vector2.up * stepSize;
+            body.Position += Vector2.up * stepSize;
         }
     }
 
     private void UnstickIfNeeded()
     {
         bool pushing = grounded && Mathf.Abs(moveInput.x) > 0.01f;
-        float speedX = Mathf.Abs(rb.linearVelocity.x);
+        float speedX = Mathf.Abs(body.Velocity.x);
 
         if(pushing && speedX < stuckSpeedThreshold)
         {
             StuckFrames++;
             if (StuckFrames >= stuckFrameToNudge)
             {
-                rb.position += Vector2.up * unstickNudgeUp;
+                body.Position += Vector2.up * unstickNudgeUp;
                 StuckFrames = 0;
             }
         }
