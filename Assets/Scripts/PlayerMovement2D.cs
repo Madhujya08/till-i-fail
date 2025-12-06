@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Linq.Expressions;
+using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -27,6 +28,10 @@ public class PlayerMovement2D : MonoBehaviour
     [SerializeField] private float dashDuration = 0.15f;
     [SerializeField] private float dashCooldown = 0.25f;
     [SerializeField] private bool dashInAirOnly = false;
+
+    [Header("Ground Snap")]
+    [SerializeField] private float snapDistance = 0.08f;
+    [SerializeField] private float snapUpBias = 0.02f;
 
     [Header("Debug")]
     [SerializeField] private bool drawGroundRay = true;
@@ -110,6 +115,8 @@ public class PlayerMovement2D : MonoBehaviour
 
     private void FixedUpdate()
     {
+        if (body == null || ground == null) return;
+
         bool groundedNow = ground.IsGrounded;
 
         if (!isDashing)
@@ -131,6 +138,8 @@ public class PlayerMovement2D : MonoBehaviour
 
             v.y = Mathf.Max(v.y, -maxFallSpeed);
             body.Velocity = v;
+
+            SnapToGroundIfNeeded();
         }
 
         else
@@ -171,6 +180,48 @@ public class PlayerMovement2D : MonoBehaviour
         isDashing = false;
 
         yield return new WaitForSeconds(dashCooldown);
+    }
+
+    private void SnapToGroundIfNeeded()
+    {
+        if (!ground.IsGrounded) return;
+        if (body.Velocity.y > 0.05f) return;
+
+        Collider2D col = body.col;
+        if (col == null) return;
+
+        Bounds b = col.bounds;
+        Vector2 origin = new Vector2(b.center.x, b.min.y + snapUpBias);
+        float rayLength = snapDistance + snapUpBias;
+
+        RaycastHit2D hit = Physics2D.Raycast(origin, Vector2.down, rayLength, ground.GroundMask);
+        if (!hit) return;
+
+        float offset = b.min.y - hit.point.y;
+
+        if (offset > 0f && offset <= snapDistance)
+        {
+            body.Position += Vector2.down * offset;
+
+            Vector2 v = body.Velocity;
+            if (v.y < 0f) v.y = 0f;
+            body.Velocity = v;
+        }
+    }
+
+    private void OnDrawGizmosSelected()
+    {
+        if (!drawGroundRay) return;
+
+        var kb = GetComponent<KinematicBody2D>();
+        if (kb == null || kb.col == null) return;
+
+        Bounds b = kb.col.bounds;
+        Vector2 origin = new Vector2(b.center.x, b.min.y + snapUpBias);
+        Vector2 endPoint = origin + Vector2.down * (snapDistance + snapUpBias);
+
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawLine(origin, endPoint);
     }
 
     //private bool isGrounded()

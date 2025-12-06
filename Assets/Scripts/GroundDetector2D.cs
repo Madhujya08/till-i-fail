@@ -7,18 +7,17 @@ using UnityEngine;
 public class GroundDetector2D : MonoBehaviour
 {
     [Header("Ground Probe")]
-    [SerializeField] float probeDistance = 0.2f;
-    [SerializeField] float probeWidthShrink = 0.1f;
     [SerializeField] LayerMask groundMask;
-    [SerializeField] int groundedMinFrames = 2;
+    [SerializeField] float probeHeight = 0.1f;
+    [SerializeField] float probeShrink = 0.1f;
+
 
     public bool IsGrounded { get; private set; }
-    public bool WasGroundedLastFrame {  get; private set; }
     public float TimeSinceLastGround { get; private set; } = 0f;
-    public Vector2 GroundNormal { get; private set; } = Vector2.up;
 
     private Collider2D col;
-    private int groundedGraceFrames;
+
+    public LayerMask GroundMask => groundMask;
 
     private void Awake()
     {
@@ -27,62 +26,24 @@ public class GroundDetector2D : MonoBehaviour
 
     private void FixedUpdate()
     {
-        ManualUpdate(Time.fixedDeltaTime);
-    }
+        if (col == null) return;
 
-    public void ManualUpdate(float dt)
-    {
-        WasGroundedLastFrame = IsGrounded;
-        bool hitSomething = ProbeGround(out RaycastHit2D bestHit);
+        Bounds b = col.bounds;
+        Vector2 size = new Vector2(b.size.x * (1f - probeShrink), probeHeight);
+        Vector2 center = new Vector2(b.center.x, b.min.y - probeHeight * 0.5f);
 
-        if(hitSomething)
+        bool hit = Physics2D.OverlapBox(center, size, 0f, groundMask);
+
+        if (hit)
         {
-            groundedGraceFrames = groundedMinFrames;
             IsGrounded = true;
             TimeSinceLastGround = 0f;
-            GroundNormal = bestHit.normal;
         }
         else
         {
-            if (groundedGraceFrames > 0)
-            {
-                groundedGraceFrames--;
-                IsGrounded = true;
-            }
-            else
-            {
-                IsGrounded = false;
-            }
-            TimeSinceLastGround += dt;
+            IsGrounded = false;
+            TimeSinceLastGround += Time.fixedDeltaTime;
         }
-    }
-
-    private bool ProbeGround(out RaycastHit2D bestHit)
-    {
-        Bounds b = col.bounds;
-
-        float margin = b.size.x * probeWidthShrink * 0.5f;
-        float leftX = b.min.x + margin;
-        float rightX = b.max.x - margin;
-        float centerX = b.center.x;
-        float y = b.min.y;
-
-        Vector2 originLeft = new Vector2(leftX, y);
-        Vector2 originCenter = new Vector2(centerX, y);
-        Vector2 originRight = new Vector2(rightX, y);
-
-        RaycastHit2D hitL = Physics2D.Raycast(originLeft, Vector2.down, probeDistance, groundMask);
-        RaycastHit2D hitC = Physics2D.Raycast(originCenter, Vector2.down, probeDistance, groundMask);
-        RaycastHit2D hitR = Physics2D.Raycast(originRight, Vector2.down, probeDistance, groundMask);
-
-        bestHit = default;
-        float bestDist = float.MaxValue;
-        bool any = false;
-
-        if (hitL.collider != null && hitL.distance < bestDist) { bestHit = hitL; bestDist = hitL.distance; any = true; }
-        if (hitC.collider != null && hitC.distance < bestDist) { bestHit = hitC; bestDist = hitC.distance; any = true; }
-        if (hitR.collider != null && hitR.distance < bestDist) { bestHit = hitR; bestDist = hitR.distance; any = true; }
-        return any;
     }
 
     private void OnDrawGizmosSelected()
@@ -91,16 +52,10 @@ public class GroundDetector2D : MonoBehaviour
         if (col == null) return;
 
         Bounds b = col.bounds;
+        Vector2 size = new Vector2(b.size.x *(1f - probeShrink), probeHeight);
+        Vector2 center = new Vector2(b.center.x, b.min.y - probeHeight * 0.5f);
 
-        float margin = b.size.x * probeWidthShrink * 0.5f;
-        float leftX = b.min.x + margin;
-        float rightX = b.max.x - margin;
-        float centerX = b.center.x;
-        float y = b.min.y;
-
-        Gizmos.color = Color.yellow;
-        Gizmos.DrawLine(new Vector2(leftX, y), new Vector2(leftX, y - probeDistance));
-        Gizmos.DrawLine(new Vector2(centerX, y), new Vector2(centerX, y - probeDistance));
-        Gizmos.DrawLine(new Vector2(rightX, y), new Vector2(rightX, y - probeDistance));
+        Gizmos.color = Color.green;
+        Gizmos.DrawWireCube(center, size);
     }
 }

@@ -1,6 +1,8 @@
 using Unity.VisualScripting;
 using UnityEngine;
 
+[RequireComponent(typeof(Rigidbody2D))]
+[RequireComponent(typeof(Collider2D))]
 public class KinematicBody2D : MonoBehaviour
 {
     public Rigidbody2D rb { get; private set; }
