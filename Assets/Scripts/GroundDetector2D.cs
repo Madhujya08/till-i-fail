@@ -28,6 +28,7 @@ public class GroundDetector2D : MonoBehaviour
     {
         if (col == null) return;
 
+        
         Bounds b = col.bounds;
         Vector2 size = new Vector2(b.size.x * (1f - probeShrink), probeHeight);
         Vector2 center = new Vector2(b.center.x, b.min.y - probeHeight * 0.5f);

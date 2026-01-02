@@ -32,6 +32,7 @@ public class PlayerMovement2D : MonoBehaviour
     [Header("Ground Snap")]
     [SerializeField] private float snapDistance = 0.08f;
     [SerializeField] private float snapUpBias = 0.02f;
+    [SerializeField] private bool enableSnap = true;
 
     [Header("Debug")]
     [SerializeField] private bool drawGroundRay = true;
@@ -42,6 +43,7 @@ public class PlayerMovement2D : MonoBehaviour
     private SpriteRenderer sr;
 
     private Vector2 moveInput;
+    private Vector2 velocity;
     private bool isFacingRight = true;
 
     private int jumpsRemaining;
@@ -49,6 +51,7 @@ public class PlayerMovement2D : MonoBehaviour
     private bool wasGrounded;
 
     private float lastJumpPressedTime;
+    private float gravity;
 
     private void Awake()
     {
@@ -59,15 +62,9 @@ public class PlayerMovement2D : MonoBehaviour
 
         if (body == null) Debug.Log("KinematicBody2D is missing on the player!");
         if (ground == null) Debug.Log("GroundDetector2D is missing on the player");
-        if (ground == null) Debug.Log("RigidBody2D missing on the player");
+        if (rb == null) Debug.Log("RigidBody2D missing on the player");
 
-        if (rb != null)
-        {
-            rb.gravityScale = 4f;
-            rb.constraints = RigidbodyConstraints2D.FreezeRotation;
-            rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
-            rb.sleepMode = RigidbodySleepMode2D.NeverSleep;
-        }
+        gravity = Physics2D.gravity.y * 4f;
 
         jumpsRemaining = maxJumps;
     }
@@ -84,11 +81,11 @@ public class PlayerMovement2D : MonoBehaviour
             lastJumpPressedTime -= Time.deltaTime;
 
 
-        if (Input.GetKeyUp(KeyCode.Space) && body.Velocity.y > 0f)
+        if (Input.GetKeyUp(KeyCode.Space) && velocity.y > 0f)
         {                                                                                                       //variable jump height
-            Vector2 v = body.Velocity;
-            v.y *= jumpCutMultiplier;
-            body.Velocity = v;
+           
+            velocity.y *= jumpCutMultiplier;
+           
         }
 
         if (Input.GetKeyDown(KeyCode.LeftShift)&& !isDashing)
@@ -119,6 +116,7 @@ public class PlayerMovement2D : MonoBehaviour
 
         bool groundedNow = ground.IsGrounded;
 
+
         if (!isDashing)
         {
             float targetX = moveInput.x * moveSpeed;
@@ -126,57 +124,52 @@ public class PlayerMovement2D : MonoBehaviour
             float accel = groundedNow ? groundAcceleration : airAcceleration;
             float decel = groundedNow ? groundAcceleration : airDeceleration;
 
-            Vector2 v = body.Velocity;
             if (Mathf.Abs(moveInput.x) > 0.01f)
             {
-                v.x = Mathf.MoveTowards(v.x, targetX, accel * Time.fixedDeltaTime);
+                velocity.x = Mathf.MoveTowards(velocity.x, targetX, accel * Time.fixedDeltaTime);
             }
             else
             {
-                v.x = Mathf.MoveTowards(v.x, 0f, decel * Time.fixedDeltaTime);
+                velocity.x = Mathf.MoveTowards(velocity.x, 0f, decel * Time.fixedDeltaTime);
             }
-
-            v.y = Mathf.Max(v.y, -maxFallSpeed);
-            body.Velocity = v;
-
-            SnapToGroundIfNeeded();
         }
-
-        else
+        if (!isDashing)
         {
-            Vector2 v = body.Velocity;
-            v.y = Mathf.Max(v.y, -maxFallSpeed);
-            body.Velocity = v;
+            velocity.y += gravity * Time.fixedDeltaTime;
         }
+
+        if (velocity.y < -maxFallSpeed)
+            velocity.y = -maxFallSpeed;
+
+        Vector2 delta = velocity * Time.fixedDeltaTime;
+        body.Move(delta);
+
+        if (enableSnap)
+            SnapToGroundIfNeeded();
     }
 
     private void PerformJump()
     {
-        float g = -Physics2D.gravity.y * body.rb.gravityScale;
+        float g = Mathf.Abs(gravity);
         float jumpVel = Mathf.Sqrt(2f * g * Mathf.Max(0.01f, desiredJumpHeight));
 
         jumpsRemaining = Mathf.Max(0, jumpsRemaining - 1);
 
-        Vector2 v = body.Velocity;
-        v.y = jumpVel;
-        body.Velocity = v;
+        velocity.y = jumpVel;
     }
 
     private IEnumerator Dash()
     {
         isDashing = true;
 
-        float originalGravityScale = body.rb.gravityScale;
-        body.rb.gravityScale= 0f;
-
         float inputX = Input.GetAxisRaw("Horizontal");
         float xDir = inputX != 0 ? Mathf.Sign(inputX) : (isFacingRight ? 1f : -1f);
 
-        body.Velocity = new Vector2(xDir * dashSpeed, 0f);
+        velocity.x = xDir * dashSpeed;
+        velocity.y = 0f;
 
         yield return new WaitForSeconds(dashDuration);
 
-        body.rb.gravityScale = originalGravityScale;
         isDashing = false;
 
         yield return new WaitForSeconds(dashCooldown);
@@ -185,7 +178,7 @@ public class PlayerMovement2D : MonoBehaviour
     private void SnapToGroundIfNeeded()
     {
         if (!ground.IsGrounded) return;
-        if (body.Velocity.y > 0.05f) return;
+        if (velocity.y > 0.05f) return;
 
         Collider2D col = body.col;
         if (col == null) return;
@@ -201,11 +194,10 @@ public class PlayerMovement2D : MonoBehaviour
 
         if (offset > 0f && offset <= snapDistance)
         {
-            body.Position += Vector2.down * offset;
+            body.rb.MovePosition(body.rb.position + Vector2.down * offset);
 
-            Vector2 v = body.Velocity;
-            if (v.y < 0f) v.y = 0f;
-            body.Velocity = v;
+            if (velocity.y < 0f)
+                velocity.y = 0f;
         }
     }
 
