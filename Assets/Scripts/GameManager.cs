@@ -60,7 +60,6 @@ public class GameManager : MonoBehaviour
     {
         levelCompleted = true;
         timerRunning = false;
-
         uiManager.ShowWinText(elapsedTime);
         canRestart = true;
     }
